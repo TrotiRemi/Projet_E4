@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    
+        <script>
+            L_NO_TOUCH = false;
+            L_DISABLE_3D = false;
+        </script>
+    
+    <style>html, body {width: 100%;height: 100%;margin: 0;padding: 0;}</style>
+    <style>#map {position:absolute;top:0;bottom:0;right:0;left:0;}</style>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_134c5b97f4b979719231f52df012aa57 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+        
+</head>
+<body>
+    
+    
+            <div class="folium-map" id="map_134c5b97f4b979719231f52df012aa57" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_134c5b97f4b979719231f52df012aa57 = L.map(
+                "map_134c5b97f4b979719231f52df012aa57",
+                {
+                    center: [43.9493401, 4.805974631688783],
+                    crs: L.CRS.EPSG3857,
+                    zoom: 14,
+                    zoomControl: true,
+                    preferCanvas: false,
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_2ff83a4a44ba8ccf7335f5152fd87bd3 = L.tileLayer(
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                {"attribution": "\u0026copy; \u003ca href=\"https://www.openstreetmap.org/copyright\"\u003eOpenStreetMap\u003c/a\u003e contributors", "detectRetina": false, "maxNativeZoom": 19, "maxZoom": 19, "minZoom": 0, "noWrap": false, "opacity": 1, "subdomains": "abc", "tms": false}
+            );
+        
+    
+            tile_layer_2ff83a4a44ba8ccf7335f5152fd87bd3.addTo(map_134c5b97f4b979719231f52df012aa57);
+        
+    
+            var marker_9a6645d9a3157386749da1dbec81d525 = L.marker(
+                [43.9493401, 4.805974631688783],
+                {}
+            ).addTo(map_134c5b97f4b979719231f52df012aa57);
+        
+    
+        var popup_414912b5075905bf00bb368eaf239ea5 = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_6d8cf822fd441f04509817ee61ec3217 = $(`<div id="html_6d8cf822fd441f04509817ee61ec3217" style="width: 100.0%; height: 100.0%;">Départ: Place de l'Horloge</div>`)[0];
+                popup_414912b5075905bf00bb368eaf239ea5.setContent(html_6d8cf822fd441f04509817ee61ec3217);
+            
+        
+
+        marker_9a6645d9a3157386749da1dbec81d525.bindPopup(popup_414912b5075905bf00bb368eaf239ea5)
+        ;
+
+        
+    
+    
+            var marker_511eebf66fe5b5cc0d47f017fe02c894 = L.marker(
+                [43.95360215372729, 4.8050901944192415],
+                {}
+            ).addTo(map_134c5b97f4b979719231f52df012aa57);
+        
+    
+        var popup_ee098ee05f09a1e74520f3df1e153af7 = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_442fbe2b80bbe38d345d50742ca8d0de = $(`<div id="html_442fbe2b80bbe38d345d50742ca8d0de" style="width: 100.0%; height: 100.0%;">Arrivée: Pont Saint-Bénézet</div>`)[0];
+                popup_ee098ee05f09a1e74520f3df1e153af7.setContent(html_442fbe2b80bbe38d345d50742ca8d0de);
+            
+        
+
+        marker_511eebf66fe5b5cc0d47f017fe02c894.bindPopup(popup_ee098ee05f09a1e74520f3df1e153af7)
+        ;
+
+        
+    
+    
+            var poly_line_820317091dba032dec99f1c8e79d6107 = L.polyline(
+                [[43.948994, 4.805725], [43.949005, 4.805691], [43.949012, 4.805651], [43.949015, 4.805508], [43.949015, 4.80548], [43.949016, 4.805334], [43.949016, 4.805069], [43.949029, 4.80501], [43.94905, 4.804962], [43.949073, 4.804932], [43.949109, 4.804917], [43.949155, 4.804908], [43.949296, 4.804907], [43.949584, 4.804908], [43.94986, 4.804917], [43.949923, 4.804916], [43.950063, 4.804925], [43.950298, 4.804938], [43.950364, 4.804943], [43.950394, 4.804945], [43.950418, 4.804937], [43.950434, 4.804896], [43.950461, 4.804603], [43.950479, 4.804407], [43.950525, 4.804117], [43.950549, 4.803934], [43.95056, 4.803888], [43.950585, 4.803827], [43.950747, 4.80352], [43.95076, 4.803489], [43.950777, 4.803456], [43.950943, 4.803103], [43.950958, 4.803059], [43.950961, 4.803023], [43.950946, 4.802974], [43.950898, 4.80293], [43.950783, 4.802872], [43.950502, 4.802677], [43.950453, 4.802653], [43.950395, 4.802635], [43.950309, 4.802611], [43.950311, 4.802569], [43.950315, 4.802519], [43.950319, 4.802474], [43.950323, 4.802424], [43.950323, 4.802403], [43.950319, 4.802361], [43.950369, 4.802351], [43.950403, 4.80233], [43.950429, 4.802311], [43.950456, 4.802296], [43.950491, 4.80229], [43.950575, 4.802349], [43.95071, 4.802446], [43.950727, 4.802458], [43.95075, 4.802475], [43.950911, 4.802594], [43.951119, 4.802739], [43.95123, 4.802847], [43.951622, 4.803298], [43.951753, 4.803423], [43.951806, 4.803455], [43.951836, 4.803506], [43.951868, 4.803557], [43.951888, 4.803587], [43.952108, 4.803864], [43.952485, 4.804305], [43.952754, 4.80462], [43.952788, 4.804662], [43.952901, 4.804809], [43.952967, 4.804904], [43.953088, 4.805106], [43.953231, 4.805386], [43.953289, 4.805531], [43.953346, 4.805711], [43.953381, 4.805849], [43.953447, 4.806114], [43.953499, 4.806354], [43.953538, 4.806562], [43.953575, 4.806759], [43.953599, 4.806698], [43.953612, 4.806657], [43.953627, 4.806587], [43.953621, 4.806558], [43.953463, 4.805941], [43.953375, 4.805623], [43.953323, 4.80547], [43.953278, 4.805357], [43.953267, 4.805325]],
+                {"bubblingMouseEvents": true, "color": "blue", "dashArray": null, "dashOffset": null, "fill": false, "fillColor": "blue", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 0.7, "smoothFactor": 1.0, "stroke": true, "weight": 4.5}
+            ).addTo(map_134c5b97f4b979719231f52df012aa57);
+        
+</script>
+</html>
