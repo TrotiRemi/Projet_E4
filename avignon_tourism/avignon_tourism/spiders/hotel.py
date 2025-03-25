@@ -1,12 +1,25 @@
 import scrapy
+import os
 
-class AvignonHotelsSpider(scrapy.Spider):
-    name = "hotels"
+class HotelSpider(scrapy.Spider):
+    name = "hotel"
     allowed_domains = ["avignon-tourisme.com"]
-    start_urls = ["https://avignon-tourisme.com/preparez-votre-sejour/hebergements/"]
+    output_file = "hotel3.csv"
+    if os.path.exists(output_file):
+        os.remove(output_file)
+    # ✅ URLs des 13 pages (1 principale + 12 paginées)
+    start_urls = [
+        "https://avignon-tourisme.com/preparez-votre-sejour/hebergements/"
+    ] + [
+        f"https://avignon-tourisme.com/preparez-votre-sejour/hebergements/?listpage={i}" for i in range(2, 13)
+    ]
 
     def parse(self, response):
-        hotels = response.css("div.item-wrapper")  # Sélection des hôtels
+        """Scraper les hôtels sur chaque page"""
+        hotels = response.css("div.item-wrapper")  # Liste des hôtels sur la page
+        page_number = response.url.split("=")[-1] if "=" in response.url else "1"  # ✅ Numéro de page
+
+        hotels_found = 0  # ✅ Compteur pour vérifier combien d'hôtels sont extraits
 
         for hotel in hotels:
             name = hotel.css("div.item-infos-title::text").get()
@@ -18,74 +31,87 @@ class AvignonHotelsSpider(scrapy.Spider):
                 hotel_url = response.urljoin(hotel_url)
 
             if hotel_url:
-                yield response.follow(hotel_url, callback=self.parse_hotel, meta={"name": name, "hotel_url": hotel_url})
+                hotels_found += 1
+                yield response.follow(hotel_url, callback=self.parse_hotel, meta={
+                    "name": name,
+                    "hotel_url": hotel_url,
+                    "page": page_number  # ✅ Ajout du numéro de page
+                })
 
-        # **Gestion de la pagination (Pages 2 à 12)**
-        current_page = response.url.split("listpage=")[-1] if "listpage=" in response.url else "1"
-        try:
-            current_page = int(current_page)
-            if current_page < 12:
-                next_page = f"https://avignon-tourisme.com/preparez-votre-sejour/hebergements/?listpage={current_page + 1}"
-                yield response.follow(next_page, callback=self.parse)
-        except ValueError:
-            pass  
+        self.logger.info(f"✅ Page {page_number} - Hôtels récupérés : {hotels_found}")
 
     def parse_hotel(self, response):
-        """Scraper les informations détaillées de chaque hôtel."""
+        """Scraper les détails de chaque hôtel"""
         name = response.meta.get("name")
         hotel_url = response.meta.get("hotel_url")
+        page = response.meta.get("page")  # ✅ Numéro de page
 
-        # Nombre d'étoiles
-        stars = len(response.css("div.item-infos-ratings span.icon-font-e909"))
-
-        # Note client
-        rating = response.css("div.item-infos-fairguest span.rating::text").get()
-        if rating:
-            rating = rating.strip()
-
-        # Adresse
+        # ✅ Adresse
         address = response.css("span.localisation-address::text").get()
-        if address:
-            address = address.strip()
+        address = address.strip() if address else "Non disponible"
 
-        # Prix (chambre double)
-        price = response.css("span.fat-price::text").get()
-        if price:
-            price = price.strip()
+         # ✅ Correction de l'extraction du type de logement
+        type_logement = response.css("p.item-infos-type::text").get()
+        
+        # ✅ Si aucun type trouvé avec CSS, on tente avec XPath
+        if not type_logement:
+            type_logement = response.xpath("//p[contains(@class, 'item-infos-type')]/text()").get()
+        
+        # ✅ Nettoyage des espaces et retours à la ligne
+        type_logement = type_logement.strip() if type_logement else "Non disponible"
 
-        # Description de l'hôtel
-        description = response.css("div.sheet-global-motto strong::text").get()
-        if description:
-            description = description.strip()
+        # ✅ **Correction de l'extraction des prix**
+        prices = []
 
-        # Services & équipements
+        # 1️⃣ **Prix "À partir de X€"**
+        starting_price = response.css("span.price-value.text-primary::text").getall()
+        if starting_price:
+            prices.append(f"À partir de {starting_price[0]}€")
+
+        # 2️⃣ **Fourchette de prix "De X€ à Y€"**
+        price_ranges = response.css("span.price-description.text-darkgray::text").getall()
+        if price_ranges:
+            prices.extend([p.replace("€", "").strip() for p in price_ranges])
+
+        # 3️⃣ **Prix avec labels spéciaux (Week-end, Taxe, etc.)**
+        special_prices = response.css("div.price-row div.flex-container.flex-dir-column")
+        for item in special_prices:
+            label = item.css("span::text").get()
+            value = item.css("span.price-value.text-primary::text").getall()
+            if label and value:
+                price_text = f"{label.strip()} : {' à '.join(value)}€"
+                prices.append(price_text)
+
+        # 4️⃣ **Suppléments éventuels**
+        supplement = response.css("div.complement-price::text").get()
+        if supplement:
+            prices.append(supplement.strip())
+
+        # ✅ Format final des prix
+        final_price = " | ".join(prices) if prices else "Non disponible"
+
+        # ✅ Équipements
         equipments = response.css("div.equipment-item span::text").getall()
-        equipments = [equip.strip() for equip in equipments if equip.strip()]
+        equipments = " | ".join([eq.strip() for eq in equipments]) if equipments else "Non disponible"
 
-        # Nombre de chambres
-        capacity = response.css("div.capacity-item span::text").get()
-        if capacity:
-            capacity = capacity.strip()
+        # ✅ Capacité formatée
+        room_count = response.css("div.cell.capacity-item span::text").get()
+        capacity_count = response.css("div.cell.capacity-item span::text").getall()
 
-        # Modes de paiement acceptés
-        payment_methods = response.css("div.payment-method-item span::text").getall()
-        payment_methods = [p.strip() for p in payment_methods if p.strip()]
+        rooms = room_count.strip() if room_count else "Non disponible"
+        capacity = capacity_count[1].strip() if len(capacity_count) > 1 else "Non disponible"
+        formatted_capacity = f"{rooms} chambre(s) pour {capacity} personnes"
 
-        # Périodes d'ouverture
+        # ✅ Périodes d’ouverture
         opening_periods = response.css("div.woody-component-sheet-opening div.cell::text").get()
-        if opening_periods:
-            opening_periods = opening_periods.strip()
+        opening_periods = opening_periods.strip() if opening_periods else "Non disponible"
 
         yield {
             "name": name,
-            "url": hotel_url,
-            "stars": stars,
-            "rating": rating,
-            "price": price,
+            "type": type_logement,
+            "price": final_price,
             "address": address,
-            "description": description,
             "equipments": equipments,
-            "capacity": capacity,
-            "payment_methods": payment_methods,
+            "formatted_capacity": formatted_capacity,
             "opening_periods": opening_periods
         }
