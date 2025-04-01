@@ -1,5 +1,9 @@
 from flask import Flask, render_template, request, redirect, flash
 import pandas as pd
+from datetime import datetime, timedelta
+from geopy.distance import geodesic
+from geopy.geocoders import Nominatim
+from functools import lru_cache
 
 app = Flask(__name__)
 app.secret_key = "votre_clé_secrète"
@@ -8,19 +12,31 @@ app.secret_key = "votre_clé_secrète"
 df_activites = pd.read_csv("activite.csv")
 df_restaurants = pd.read_csv("restaurants.csv")
 
-def extraire_horaire_du_jour(horaires_str, jour_abbr):
-    if not isinstance(horaires_str, str):
-        return "Fermé"
-    horaires = horaires_str.split(";")
-    for bloc in horaires:
-        bloc = bloc.strip()
-        if bloc.startswith(f"{jour_abbr}:"):
-            try:
-                return bloc.split(":", 1)[1].strip()
-            except:
-                return "Fermé"
-    return "Fermé"
+# Géolocalisation
+geolocator = Nominatim(user_agent="planning_app")
+@lru_cache(maxsize=1024)
+def get_coords(address):
+    try:
+        location = geolocator.geocode(address)
+        if location:
+            return (location.latitude, location.longitude)
+    except:
+        return None
+    return None
 
+def calculate_walking_minutes(addr1, addr2):
+    coords1 = get_coords(addr1)
+    coords2 = get_coords(addr2)
+    if coords1 and coords2:
+        distance_km = geodesic(coords1, coords2).km
+        walking_speed_kmh = 5
+        time_hours = distance_km / walking_speed_kmh
+        return int(time_hours * 60)
+    return 15
+
+# Adresse centrale d'Avignon pour démarrer les trajets
+adresse_depart = "Place de l'Horloge, Avignon, France"
+coord_centre = get_coords(adresse_depart)
 def get_min_price(pricing_str):
     try:
         if not isinstance(pricing_str, str) or not pricing_str.strip():
@@ -34,7 +50,6 @@ def get_min_price(pricing_str):
     except:
         return None
 
-# Prétraitement
 all_themes = set()
 for themes in df_activites["thèmes"].dropna():
     for theme in themes.split(", "):
@@ -77,10 +92,8 @@ def index():
             return redirect("/")
 
         budget = float(budget)
-        debut_heure = int(debut_heure) if debut_heure else None
-        fin_heure = int(fin_heure) if fin_heure else None
-
-        resultats_final = []
+        debut_heure = int(debut_heure) if debut_heure else 10
+        fin_heure = int(fin_heure) if fin_heure else 23
 
         jour_abbr_map = {
             "Lundi": "L", "Mardi": "M", "Mercredi": "ME",
@@ -88,7 +101,7 @@ def index():
         }
         jour_abbr = jour_abbr_map.get(jour_label, "L")
 
-        # Restaurants
+        # --- Restaurants ---
         restaurants_filtres = df_restaurants.copy()
         restaurants_filtres["rating"] = restaurants_filtres["rating"].replace("N/D", "0").astype(float)
         restaurants_filtres.loc[restaurants_filtres["rating"] > 10, "rating"] = 0
@@ -97,34 +110,12 @@ def index():
         if types_selectionnes:
             restaurants_filtres = restaurants_filtres[restaurants_filtres["specialties"].apply(
                 lambda x: any(t in x for t in types_selectionnes if isinstance(x, str)))]
-        restaurants_filtres = restaurants_filtres.sort_values(by="rating", ascending=False)
-        restaurants_filtres = restaurants_filtres.head(nombre_restaurants).to_dict(orient="records")
+        restaurants_filtres = restaurants_filtres.sort_values(by="rating", ascending=False).to_dict(orient="records")
 
-        # Activités
+        # --- Activités ---
         activites_filtrees = df_activites.copy()
         activites_filtrees["horaires"] = activites_filtrees["horaires"].astype(str).fillna("")
         activites_filtrees["thèmes"] = activites_filtrees["thèmes"].astype(str).fillna("")
-        if jour and (not debut_heure or not fin_heure):
-            activites_filtrees = activites_filtrees[
-                activites_filtrees["horaires"].str.contains(jour, na=False) |
-                activites_filtrees["horaires"].str.contains("Non disponible", na=False)
-            ]
-        if debut_heure and fin_heure:
-            def check_time_available(horaires):
-                if "Non disponible" in horaires:
-                    return True
-                for horaire in horaires.split("; "):
-                    try:
-                        jour_code, plage = horaire.split(": ")
-                        plages_horaires = plage.split(" et ")
-                        for plage in plages_horaires:
-                            h_debut, h_fin = map(int, plage.replace("h00", "").split("-"))
-                            if debut_heure <= h_fin and fin_heure >= h_debut:
-                                return True
-                    except ValueError:
-                        pass
-                return False
-            activites_filtrees = activites_filtrees[activites_filtrees["horaires"].apply(check_time_available)]
         activites_filtrees["tarifs"] = activites_filtrees["tarifs"].replace("N/D", "0").astype(float)
         activites_filtrees = activites_filtrees[activites_filtrees["tarifs"] <= budget]
         if themes_selectionnes:
@@ -132,24 +123,92 @@ def index():
                 lambda x: any(theme in x for theme in themes_selectionnes))]
         activites_filtrees["note"] = activites_filtrees["note"].replace("N/D", "0").astype(float)
         activites_filtrees.loc[activites_filtrees["note"] > 10, "note"] /= 2
-        activites_filtrees = activites_filtrees.sort_values(by="note", ascending=False)
-        activites_filtrees = activites_filtrees.head(nombre_activites).to_dict(orient="records")
+        activites_filtrees = activites_filtrees.sort_values(by="note", ascending=False).to_dict(orient="records")
 
-        for activite in activites_filtrees:
-            activite["image"] = activite.get("image", "default_image.jpg")
+        for item in activites_filtrees + restaurants_filtres:
+            item["image"] = item.get("image", "default_image.jpg")
 
-        resultats_final.extend(restaurants_filtres)
-        resultats_final.extend(activites_filtrees)
+        events = []
+        current_time = datetime.strptime(f"{debut_heure}:00", "%H:%M")
+        end_time = datetime.strptime(f"{fin_heure}:00", "%H:%M")
 
-        for item in resultats_final:
-            if "horaires" in item:
-                item["horaire_du_jour"] = extraire_horaire_du_jour(item["horaires"], jour_abbr)
-            elif jour_label in item:
-                item["horaire_du_jour"] = item[jour_label]
+        resto_added = 0
+        act_added = 0
+
+        used_indices = set()
+
+        while current_time + timedelta(minutes=30) <= end_time:
+            candidates = []
+
+            # Sélection des restaurants possibles
+            for i, r in enumerate(restaurants_filtres):
+                if i in used_indices:
+                    continue
+                r_coords = get_coords(r["address"])
+                if not r_coords:
+                    continue
+                dist = geodesic(coord_centre, r_coords).km
+                # Conditions horaires midi ou soir
+                if datetime.strptime("11:30", "%H:%M") <= current_time <= datetime.strptime("15:30", "%H:%M") - timedelta(hours=2):
+                    candidates.append(("Restaurant", r, 120, dist, i))
+                elif datetime.strptime("19:00", "%H:%M") <= current_time <= datetime.strptime("21:00", "%H:%M") - timedelta(hours=2):
+                    candidates.append(("Restaurant", r, 120, dist, i))
+
+            # Puis les activités si pas déjà assez
+            if len(candidates) == 0 and act_added < nombre_activites:
+                for j, a in enumerate(activites_filtrees):
+                    if j in used_indices:
+                        continue
+                    a_coords = get_coords(a["adresse"])
+                    if not a_coords:
+                        continue
+                    dist = geodesic(coord_centre, a_coords).km
+                    candidates.append(("Activité", a, 60, dist, j))
+
+            if not candidates:
+                current_time += timedelta(minutes=15)
+                continue
+
+            # Trier par proximité
+            candidates.sort(key=lambda x: x[3])  # distance
+
+            # Choisir le meilleur élément
+            for typ, item, duration, _, idx in candidates:
+                prev_address = (
+                    events[-1][1].get("adresse") if events and events[-1][0] != "Marche"
+                    else events[-2][1].get("adresse") if len(events) >= 2 else adresse_depart
+                )
+                next_address = item.get("adresse") or item.get("address")
+                walk_min = calculate_walking_minutes(prev_address, next_address)
+                total_duration = walk_min + duration
+
+                if current_time + timedelta(minutes=total_duration) <= end_time:
+                    start_walk = current_time
+                    end_walk = current_time + timedelta(minutes=walk_min)
+                    start_act = end_walk
+                    end_act = end_walk + timedelta(minutes=duration)
+
+                    events.append(("Marche", {"from": prev_address, "to": next_address, "duration": walk_min}, start_walk, end_walk))
+                    events.append((typ, item, start_act, end_act))
+                    used_indices.add(idx)
+                    current_time = end_act
+                    if typ == "Restaurant":
+                        resto_added += 1
+                    else:
+                        act_added += 1
+                    break
             else:
-                item["horaire_du_jour"] = "Fermé"
+                current_time += timedelta(minutes=15)
 
-        return render_template("resultats.html", activites=resultats_final, jour_label=jour_label)
+        planning = [{
+            "titre": typ,
+            "item": el,
+            "debut": start.strftime("%Hh%M"),
+            "fin": end.strftime("%Hh%M")
+        } for typ, el, start, end in events]
+
+        return render_template("resultats.html", planning=planning, jour_label=jour_label)
+
 
     return render_template("index.html", themes_disponibles=themes_disponibles, types_restaurants=types_restaurants)
 
