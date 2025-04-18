@@ -1,214 +1,375 @@
-from flask import Flask, render_template, request, redirect, flash
+from flask import Flask, render_template, request, redirect, flash 
 import pandas as pd
 from datetime import datetime, timedelta
-from geopy.distance import geodesic
-from geopy.geocoders import Nominatim
-from functools import lru_cache
 
 app = Flask(__name__)
 app.secret_key = "votre_clé_secrète"
 
-# Chargement des données
-df_activites = pd.read_csv("activite.csv")
+adresse_depart = "Casa Bronzini"
+df_activites = pd.read_csv("activites.csv")
 df_restaurants = pd.read_csv("restaurants.csv")
+df_enriched = pd.read_csv("matrice_distances_enrichie.csv")
 
-# Géolocalisation
-geolocator = Nominatim(user_agent="planning_app")
-@lru_cache(maxsize=1024)
-def get_coords(address):
-    try:
-        location = geolocator.geocode(address)
-        if location:
-            return (location.latitude, location.longitude)
-    except:
-        return None
-    return None
+MAX_WALK_MINUTES = 30
+df_enriched = df_enriched[df_enriched["time_min"] <= MAX_WALK_MINUTES]
 
-def calculate_walking_minutes(addr1, addr2):
-    coords1 = get_coords(addr1)
-    coords2 = get_coords(addr2)
-    if coords1 and coords2:
-        distance_km = geodesic(coords1, coords2).km
-        walking_speed_kmh = 5
-        time_hours = distance_km / walking_speed_kmh
-        return int(time_hours * 60)
-    return 15
+distance_lookup = df_enriched.set_index(["from_name", "to_name"])["time_min"].to_dict()
+address_lookup = df_enriched.set_index("from_name")["from_address"].to_dict()
+address_lookup.update(df_enriched.set_index("to_name")["to_address"].to_dict())
 
-# Adresse centrale d'Avignon pour démarrer les trajets
-adresse_depart = "Place de l'Horloge, Avignon, France"
-coord_centre = get_coords(adresse_depart)
+all_names = set(df_enriched["from_name"]) | set(df_enriched["to_name"])
+df_valid_activites = df_activites[df_activites["nom"].isin(all_names)]
+name_to_activite = {row["nom"]: row for _, row in df_valid_activites.iterrows()}
+df_valid_restos = df_restaurants[df_restaurants["name"].isin(all_names)]
+name_to_restaurant = {row["name"]: row for _, row in df_valid_restos.iterrows()}
+
+themes_disponibles = sorted(set(theme.strip() for t in df_activites["catégorie_simplifiée"].dropna() for theme in t.split(", ")))
+types_restaurants = sorted(set(s.strip() for t in df_restaurants["categorie_specialite"].dropna() for s in t.split(",")))
+
+rythme_config = {
+    "intensif": {"midi": (12, 12.75), "soir": (20, 21), "nb_act": (3, 8)},
+    "complet": {"midi": (11.75, 13), "soir": (20, 21.25), "nb_act": (2, 6)},
+    "normal": {"midi": (11.75, 13.25), "soir": (19.75, 21.25), "nb_act": (2, 5)},
+    "calme": {"midi": (11.5, 13.25), "soir": (19.75, 21.75), "nb_act": (1, 4)},
+    "tres_calme": {"midi": (11.5, 13.5), "soir": (19.5, 22), "nb_act": (0, 3)}
+}
+
 def get_min_price(pricing_str):
     try:
-        if not isinstance(pricing_str, str) or not pricing_str.strip():
-            return None
-        prixs = []
-        for prix in pricing_str.split(","):
-            cleaned = prix.replace("€", "").replace("\xa0", "").replace(" ", "").replace(",", ".").strip()
-            if cleaned:
-                prixs.append(float(cleaned))
+        if not isinstance(pricing_str, str): return None
+        prixs = [float(p.replace("\u20ac", "").replace(",", ".").strip()) for p in pricing_str.split(",") if p.strip()]
         return min(prixs) if prixs else None
+    except: return None
+
+def nettoyer_note(note):
+    try:
+        if note == "N/D" or pd.isna(note):
+            return None
+        note = float(str(note).replace(",", ".").strip())
+        if note > 10:
+            note /= 2
+        return round(note, 1)
     except:
         return None
 
-all_themes = set()
-for themes in df_activites["thèmes"].dropna():
-    for theme in themes.split(", "):
-        all_themes.add(theme)
-themes_disponibles = sorted(all_themes)
+def nettoyer_horaires(horaire):
+    if isinstance(horaire, str) and horaire.strip().lower() == "n/d":
+        return "Ouvert tout le temps"
+    return horaire
 
-all_specs = set()
-for specs in df_restaurants["specialties"].dropna():
-    for s in specs.split(","):
-        all_specs.add(s.strip())
-types_restaurants = sorted(all_specs)
+def parse_int(val, default):
+    try: return int(val)
+    except: return default
 
-df_restaurants["prix_min"] = df_restaurants["pricing"].apply(get_min_price)
-df_restaurants = df_restaurants[df_restaurants["prix_min"].notna()]
+def parse_float(val, default):
+    try: return float(val)
+    except: return default
 
 def jour_to_label(abbr):
     return {
-        "L": "Lundi", "M": "Mardi", "ME": "Mercredi",
-        "J": "Jeudi", "V": "Vendredi", "S": "Samedi", "D": "Dimanche"
+        "L": "Lundi",
+        "M": "Mardi",
+        "ME": "Mercredi",
+        "J": "Jeudi",
+        "V": "Vendredi",
+        "S": "Samedi",
+        "D": "Dimanche"
     }.get(abbr, "Lundi")
+
+def heure_float_to_datetime(base_date, h):
+    heures = int(h)
+    minutes = int((h - heures) * 60)
+    return datetime(base_date.year, base_date.month, base_date.day, heures, minutes)
+
+def get_precomputed_walking_minutes(from_name, to_name):
+    from_name, to_name = from_name.strip().lower(), to_name.strip().lower()
+    for a, b in [(from_name, to_name), (to_name, from_name)]:
+        for key in distance_lookup:
+            if key[0].strip().lower() == a and key[1].strip().lower() == b:
+                return distance_lookup[key]
+    return None
+
+def place_activites_between(start_time, end_time, start_place, end_place, activites, planning, used, nb_activites_voulues):
+    base_date = datetime.today()
+
+    if nb_activites_voulues <= 0:
+        return
+
+    position = start_place
+    current_time = start_time
+
+    # Temps total disponible sans toucher end_time
+    duree_dispo_total = (end_time - start_time).total_seconds() / 60  # en minutes
+
+    candidats = [act for act in activites if act["nom"] not in used]
+
+    for i in range(nb_activites_voulues):
+        if not candidats:
+            break
+
+        # Chercher activité la plus proche
+        candidats.sort(key=lambda act: get_precomputed_walking_minutes(position, act["nom"]) or 9999)
+        act = candidats.pop(0)
+
+        # Temps de marche vers cette activité
+        walk_to_act = get_precomputed_walking_minutes(position, act["nom"])
+        if walk_to_act is None or walk_to_act > MAX_WALK_MINUTES:
+            continue
+
+        # Temps de marche de cette activité vers end_place (ex : resto)
+        walk_to_end = get_precomputed_walking_minutes(act["nom"], end_place)
+        if walk_to_end is None:
+            walk_to_end = 0
+
+        # ➡️ Temps restant après la marche actuelle et la marche vers la fin
+        duree_restante = (end_time - current_time).total_seconds() / 60 - walk_to_act - walk_to_end
+
+        if duree_restante <= 0:
+            break
+
+        # Répartir également la durée restante sur les activités restantes
+        duree_actuelle = duree_restante / (nb_activites_voulues - i)
+
+        # Avancer : marche -> activité
+        arrive = current_time + timedelta(minutes=walk_to_act)
+        fin = arrive + timedelta(minutes=duree_actuelle)
+
+        planning.append({
+            "titre": "Marche",
+            "item": {"from": address_lookup.get(position), "to": address_lookup.get(act["nom"]), "duration": walk_to_act},
+            "debut": current_time,
+            "fin": arrive
+        })
+        planning.append({
+            "titre": "Activité",
+            "item": act,
+            "debut": arrive,
+            "fin": fin
+        })
+
+        used.add(act["nom"])
+        position = act["nom"]
+        current_time = fin
+
+    # ➡️ Enfin, après les activités ➔ marche vers end_place
+    if position != end_place:
+        walk_final = get_precomputed_walking_minutes(position, end_place)
+        if walk_final is not None and walk_final <= MAX_WALK_MINUTES:
+            arrive_end = current_time
+            fin_end = arrive_end + timedelta(minutes=walk_final)
+            planning.append({
+                "titre": "Marche",
+                "item": {"from": address_lookup.get(position), "to": address_lookup.get(end_place), "duration": walk_final},
+                "debut": arrive_end,
+                "fin": fin_end
+            })
+
+
+def trouver_restaurants(restaurants_list, start_point, max_walk_minutes=60):
+    candidats = []
+    for resto1 in restaurants_list:
+        walk1 = get_precomputed_walking_minutes(start_point, resto1["name"])
+        if walk1 is None:
+            print(f"[DEBUG] Distance manquante: {start_point} ➔ {resto1['name']}")
+            continue
+        if walk1 > max_walk_minutes:
+            continue
+
+        for resto2 in restaurants_list:
+            if resto1["name"] == resto2["name"]:
+                continue
+            walk2 = get_precomputed_walking_minutes(start_point, resto2["name"])
+            walk_between = get_precomputed_walking_minutes(resto1["name"], resto2["name"])
+
+            if walk2 is None:
+                print(f"[DEBUG] Distance manquante: {start_point} ➔ {resto2['name']}")
+                continue
+            if walk2 > max_walk_minutes:
+                continue
+            if walk_between is None:
+                print(f"[DEBUG] Distance manquante: {resto1['name']} ➔ {resto2['name']}")
+                continue
+            if walk_between > max_walk_minutes:
+                continue
+
+            note_moyenne = (resto1["rating"] + resto2["rating"]) / 2
+            candidats.append((note_moyenne, resto1, resto2))
+
+    if not candidats:
+        return None, None
+
+    meilleurs = sorted(candidats, key=lambda x: -x[0])[0]
+    return meilleurs[1], meilleurs[2]
+
+
+def planifier_journee(debut_heure, fin_heure, rythme, activites, restaurants_list, resto_midi, resto_soir):
+    base_date = datetime.today()
+    planning = []
+    used = set()
+    position = adresse_depart
+
+    start_day = datetime(base_date.year, base_date.month, base_date.day, debut_heure)
+    end_day = datetime(base_date.year, base_date.month, base_date.day, fin_heure)
+
+    cfg = rythme_config[rythme]
+    nb_activites_matin = cfg["nb_act"][0]
+    nb_activites_aprem = cfg["nb_act"][1]
+    midi_start = heure_float_to_datetime(base_date, cfg["midi"][0])
+    midi_end = heure_float_to_datetime(base_date, cfg["midi"][1])
+    soir_start = heure_float_to_datetime(base_date, cfg["soir"][0])
+    soir_end = heure_float_to_datetime(base_date, cfg["soir"][1])
+
+    resto_midi_obj = None
+    resto_soir_obj = None
+
+    if resto_midi or resto_soir:
+        resto_midi_obj, resto_soir_obj = trouver_restaurants(restaurants_list, adresse_depart)
+
+    # Si l'utilisateur a coché un resto mais aucun trouvé, alors on arrête
+    if resto_midi and not resto_midi_obj:
+        print("[DEBUG] Aucun restaurant midi trouvé")
+        return []
+    if resto_soir and not resto_soir_obj:
+        print("[DEBUG] Aucun restaurant soir trouvé")
+        return []
+
+    if resto_midi and resto_midi_obj:
+        used.add(resto_midi_obj["name"])
+    if resto_soir and resto_soir_obj:
+        used.add(resto_soir_obj["name"])
+
+    # Déterminer les moments de la journée
+    moments = []
+    total_activites = nb_activites_matin + nb_activites_aprem
+
+    if resto_midi and resto_soir:
+        # Cas normal : resto midi ET soir
+        moments.append((start_day, midi_start, adresse_depart, resto_midi_obj["name"], nb_activites_matin))
+        moments.append((midi_end, soir_start, resto_midi_obj["name"], resto_soir_obj["name"], nb_activites_aprem))
+        moments.append((soir_end, end_day, resto_soir_obj["name"], adresse_depart, 0))
+    elif resto_midi and not resto_soir:
+        # Seulement resto midi
+        moments.append((start_day, midi_start, adresse_depart, resto_midi_obj["name"], nb_activites_matin))
+        moments.append((midi_end, end_day, resto_midi_obj["name"], adresse_depart, nb_activites_aprem))
+    elif not resto_midi and resto_soir:
+        # Seulement resto soir
+        moments.append((start_day, soir_start, adresse_depart, resto_soir_obj["name"], total_activites))
+        moments.append((soir_end, end_day, resto_soir_obj["name"], adresse_depart, 0))
+    else:
+        # Aucun resto (ni midi ni soir)
+        moments.append((start_day, end_day, adresse_depart, adresse_depart, total_activites))
+
+    # Placer les activités
+    for start_time, end_time, start_place, end_place, nb_acts in moments:
+        place_activites_between(start_time, end_time, start_place, end_place, activites, planning, used, nb_acts)
+
+    # Ajouter les restaurants si demandés
+    if resto_midi and resto_midi_obj:
+        planning.append({"titre": "Restaurant", "item": resto_midi_obj, "debut": midi_start, "fin": midi_end})
+    if resto_soir and resto_soir_obj:
+        planning.append({"titre": "Restaurant", "item": resto_soir_obj, "debut": soir_start, "fin": soir_end})
+
+    planning.sort(key=lambda x: x["debut"])
+
+    return planning
+
+
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        jour = request.form.get("jour", "")
-        jour_label = jour_to_label(jour)
-        debut_heure = request.form.get("debut_heure", "")
-        fin_heure = request.form.get("fin_heure", "")
-        budget = request.form.get("budget", "")
-        nombre_activites = int(request.form.get("nombre_activites", 0))
-        nombre_restaurants = int(request.form.get("nombre_restaurants", 0))
+        participants = parse_int(request.form.get("participants"), 1)
+        jour_label = jour_to_label(request.form.get("jour", ""))
+        debut_heure = parse_int(request.form.get("debut_heure"), 9)
+        fin_heure = parse_int(request.form.get("fin_heure"), 23)
+        budget = parse_float(request.form.get("budget"), 0)
+        rythme = request.form.get("rythme", "normal").lower()
+        resto_midi = "midi" in request.form.getlist("repas")
+        resto_soir = "soir" in request.form.getlist("repas")
         themes_selectionnes = request.form.getlist("themes")
         types_selectionnes = request.form.getlist("types_restaurants")
 
-        if not budget:
-            flash("Veuillez renseigner un budget.", "danger")
-            return redirect("/")
-        if not jour_label:
-            flash("Veuillez sélectionner un jour de la semaine.", "danger")
-            return redirect("/")
+        restaurants = df_restaurants.copy()
+        restaurants["prix_min"] = restaurants["pricing"].apply(get_min_price)
 
-        budget = float(budget)
-        debut_heure = int(debut_heure) if debut_heure else 10
-        fin_heure = int(fin_heure) if fin_heure else 23
+        restaurants["note_corrigee"] = restaurants["rating"].apply(nettoyer_note)
+        restaurants = restaurants[restaurants["note_corrigee"].notnull()]  # Garder seulement ceux avec une note valide
 
-        jour_abbr_map = {
-            "Lundi": "L", "Mardi": "M", "Mercredi": "ME",
-            "Jeudi": "J", "Vendredi": "V", "Samedi": "S", "Dimanche": "D"
-        }
-        jour_abbr = jour_abbr_map.get(jour_label, "L")
+        restaurants = restaurants[
+            (restaurants["prix_min"] * participants <= budget) &
+            (restaurants[jour_label].str.lower() != "fermé")
+        ]
 
-        # --- Restaurants ---
-        restaurants_filtres = df_restaurants.copy()
-        restaurants_filtres["rating"] = restaurants_filtres["rating"].replace("N/D", "0").astype(float)
-        restaurants_filtres.loc[restaurants_filtres["rating"] > 10, "rating"] = 0
-        restaurants_filtres = restaurants_filtres[restaurants_filtres["prix_min"] <= budget]
-        restaurants_filtres = restaurants_filtres[restaurants_filtres[jour_label].str.lower() != "fermé"]
         if types_selectionnes:
-            restaurants_filtres = restaurants_filtres[restaurants_filtres["specialties"].apply(
-                lambda x: any(t in x for t in types_selectionnes if isinstance(x, str)))]
-        restaurants_filtres = restaurants_filtres.sort_values(by="rating", ascending=False).to_dict(orient="records")
+            restaurants = restaurants[
+                restaurants["categorie_specialite"].apply(lambda x: any(t in x for t in types_selectionnes if isinstance(x, str)))
+            ]
 
-        # --- Activités ---
-        activites_filtrees = df_activites.copy()
-        activites_filtrees["horaires"] = activites_filtrees["horaires"].astype(str).fillna("")
-        activites_filtrees["thèmes"] = activites_filtrees["thèmes"].astype(str).fillna("")
-        activites_filtrees["tarifs"] = activites_filtrees["tarifs"].replace("N/D", "0").astype(float)
-        activites_filtrees = activites_filtrees[activites_filtrees["tarifs"] <= budget]
+        if not restaurants.empty and "note_corrigee" in restaurants.columns:
+            restaurants = restaurants.sort_values(by="note_corrigee", ascending=False)
+            restaurants_list = restaurants.to_dict(orient="records")
+        else:
+            restaurants_list = []
+
+
+        activites = df_activites.copy()
+        activites["tarifs"] = activites["tarifs"].replace("N/D", "0").astype(float)
+
+        # Correction PROPRE des notes avec fonction existante
+        activites["note_corrigee"] = activites["note"].apply(nettoyer_note)
+
+        # Garder uniquement celles respectant le budget
+        activites = activites[activites["tarifs"] <= budget]
+
+        # Appliquer les filtres par thèmes s'il y en a
         if themes_selectionnes:
-            activites_filtrees = activites_filtrees[activites_filtrees["thèmes"].apply(
-                lambda x: any(theme in x for theme in themes_selectionnes))]
-        activites_filtrees["note"] = activites_filtrees["note"].replace("N/D", "0").astype(float)
-        activites_filtrees.loc[activites_filtrees["note"] > 10, "note"] /= 2
-        activites_filtrees = activites_filtrees.sort_values(by="note", ascending=False).to_dict(orient="records")
+            activites = activites[
+                activites["catégorie_simplifiée"].apply(lambda x: isinstance(x, str) and any(t in x for t in themes_selectionnes))
+            ]
 
-        for item in activites_filtrees + restaurants_filtres:
-            item["image"] = item.get("image", "default_image.jpg")
+        for col in ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]:
+            if col in activites.columns:
+                activites[col] = activites[col].apply(nettoyer_horaires)
 
-        events = []
-        current_time = datetime.strptime(f"{debut_heure}:00", "%H:%M")
-        end_time = datetime.strptime(f"{fin_heure}:00", "%H:%M")
+        # Trier par note corrigée (les activités sans note seront en bas)
+        activites = activites.sort_values(
+            by="note_corrigee", ascending=False, na_position='last'
+        ).to_dict(orient="records")
 
-        resto_added = 0
-        act_added = 0
+        planning = planifier_journee(debut_heure, fin_heure, rythme, activites, restaurants_list, resto_midi, resto_soir)
 
-        used_indices = set()
+        total_marche = 0
+        total_prix = 0
+        nb_activites = 0
+        nb_restaurants = 0
 
-        while current_time + timedelta(minutes=30) <= end_time:
-            candidates = []
+        for ev in planning:
+            if ev["titre"] == "Marche":
+                total_marche += ev["item"]["duration"]
+            elif ev["titre"] == "Activité":
+                nb_activites += 1
+                if "tarifs" in ev["item"]:
+                    total_prix += float(ev["item"]["tarifs"]) * participants
+            elif ev["titre"] == "Restaurant":
+                nb_restaurants += 1
+                if "prix_min" in ev["item"]:
+                    total_prix += float(ev["item"]["prix_min"]) * participants
 
-            # Sélection des restaurants possibles
-            for i, r in enumerate(restaurants_filtres):
-                if i in used_indices:
-                    continue
-                r_coords = get_coords(r["address"])
-                if not r_coords:
-                    continue
-                dist = geodesic(coord_centre, r_coords).km
-                # Conditions horaires midi ou soir
-                if datetime.strptime("11:30", "%H:%M") <= current_time <= datetime.strptime("15:30", "%H:%M") - timedelta(hours=2):
-                    candidates.append(("Restaurant", r, 120, dist, i))
-                elif datetime.strptime("19:00", "%H:%M") <= current_time <= datetime.strptime("21:00", "%H:%M") - timedelta(hours=2):
-                    candidates.append(("Restaurant", r, 120, dist, i))
-
-            # Puis les activités si pas déjà assez
-            if len(candidates) == 0 and act_added < nombre_activites:
-                for j, a in enumerate(activites_filtrees):
-                    if j in used_indices:
-                        continue
-                    a_coords = get_coords(a["adresse"])
-                    if not a_coords:
-                        continue
-                    dist = geodesic(coord_centre, a_coords).km
-                    candidates.append(("Activité", a, 60, dist, j))
-
-            if not candidates:
-                current_time += timedelta(minutes=15)
-                continue
-
-            # Trier par proximité
-            candidates.sort(key=lambda x: x[3])  # distance
-
-            # Choisir le meilleur élément
-            for typ, item, duration, _, idx in candidates:
-                prev_address = (
-                    events[-1][1].get("adresse") if events and events[-1][0] != "Marche"
-                    else events[-2][1].get("adresse") if len(events) >= 2 else adresse_depart
-                )
-                next_address = item.get("adresse") or item.get("address")
-                walk_min = calculate_walking_minutes(prev_address, next_address)
-                total_duration = walk_min + duration
-
-                if current_time + timedelta(minutes=total_duration) <= end_time:
-                    start_walk = current_time
-                    end_walk = current_time + timedelta(minutes=walk_min)
-                    start_act = end_walk
-                    end_act = end_walk + timedelta(minutes=duration)
-
-                    events.append(("Marche", {"from": prev_address, "to": next_address, "duration": walk_min}, start_walk, end_walk))
-                    events.append((typ, item, start_act, end_act))
-                    used_indices.add(idx)
-                    current_time = end_act
-                    if typ == "Restaurant":
-                        resto_added += 1
-                    else:
-                        act_added += 1
-                    break
-            else:
-                current_time += timedelta(minutes=15)
-
-        planning = [{
-            "titre": typ,
-            "item": el,
-            "debut": start.strftime("%Hh%M"),
-            "fin": end.strftime("%Hh%M")
-        } for typ, el, start, end in events]
-
-        return render_template("resultats.html", planning=planning, jour_label=jour_label)
-
+        return render_template(
+            "resultats.html",
+            planning=[{
+                "titre": ev["titre"],
+                "item": ev["item"].to_dict() if hasattr(ev["item"], "to_dict") else ev["item"],
+                "debut": ev["debut"].strftime("%Hh%M"),
+                "fin": ev["fin"].strftime("%Hh%M")
+            } for ev in planning],
+            jour_label=jour_label,
+            total_marche=total_marche,
+            total_prix=round(total_prix, 2),
+            nb_activites=nb_activites,
+            nb_restaurants=nb_restaurants,
+            participants=participants
+        )
 
     return render_template("index.html", themes_disponibles=themes_disponibles, types_restaurants=types_restaurants)
 

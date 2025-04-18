@@ -29,10 +29,14 @@
 
         <form method="POST" class="shadow p-4 bg-white rounded">
             <div class="mb-3">
+                <label class="form-label">Nombre de participants :</label>
+                <input type="number" class="form-control" name="participants" min="1" value="1" required>
+            </div>
+
+            <div class="mb-3">
                 <label class="form-label">Jour de la semaine :</label>
                 <select class="form-select" name="jour" required>
-                    <option value="">-- Choisir --</option>
-                    <option value="L">Lundi</option>
+                    <option value="L" selected>Lundi</option>
                     <option value="M">Mardi</option>
                     <option value="ME">Mercredi</option>
                     <option value="J">Jeudi</option>
@@ -43,32 +47,15 @@
             </div>
 
             <div class="mb-3">
-                <label class="form-label">Plage horaire :</label>
-                <div class="row">
-                    <div class="col">
-                        <label class="form-label">Début :</label>
-                        <select class="form-select" name="debut_heure">
-                            <option value="">Aucune limite</option>
-                            {% for h in range(7, 22) %}
-                                <option value="{{ h }}">{{ h }}h00</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="col">
-                        <label class="form-label">Fin :</label>
-                        <select class="form-select" name="fin_heure">
-                            <option value="">Aucune limite</option>
-                            {% for h in range(8, 23) %}
-                                <option value="{{ h }}">{{ h }}h00</option>
-                            {% endfor %}
-                        </select>
-                    </div>
+                <label class="form-label">Repas souhaités :</label><br>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" name="repas" value="midi" checked>
+                    <label class="form-check-label">Déjeuner (midi)</label>
                 </div>
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label">Nombre de restaurants souhaités :</label>
-                <input type="number" class="form-control" name="nombre_restaurants" min="0">
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" name="repas" value="soir" checked>
+                    <label class="form-check-label">Dîner (soir)</label>
+                </div>
             </div>
 
             <div class="mb-3">
@@ -83,12 +70,18 @@
 
             <div class="mb-3">
                 <label class="form-label">Budget disponible (€) :</label>
-                <input type="number" class="form-control" name="budget" min="0" step="0.5" placeholder="Aucun maximum" required>
+                <input type="number" class="form-control" name="budget" min="0" step="0.5" value="0" required>
             </div>
 
             <div class="mb-3">
-                <label class="form-label">Nombre d'activités souhaitées :</label>
-                <input type="number" class="form-control" name="nombre_activites" min="0">
+                <label class="form-label">Rythme de la journée :</label>
+                <select class="form-select" name="rythme" required>
+                    <option value="intensif">Intensif</option>
+                    <option value="complet">Complet</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="calme">Calme</option>
+                    <option value="tres_calme">Très calme</option>
+                </select>
             </div>
 
             <div class="mb-3">

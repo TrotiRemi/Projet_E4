@@ -23,60 +23,91 @@
             left: -1.5rem;
             top: 0;
         }
-        .card {
-            background-color: #f8f9fa;
-        }
         .timeline-marche::before {
             content: "🚶";
             color: #28a745;
         }
+        .card {
+            background-color: #f8f9fa;
+        }
     </style>
 </head>
+
 <body>
     <div class="container mt-5">
         <h3 class="text-center mb-4">Planning de votre journée ({{ jour_label }})</h3>
+
+        <!-- Résumé -->
+        <div class="alert alert-info">
+            <strong>Récapitulatif :</strong><br>
+            Nombre de participants : {{ participants }}<br>
+            Nombre d'activités : {{ nb_activites }}<br>
+            Nombre de restaurants : {{ nb_restaurants }}<br>
+            Temps total de marche : {{ total_marche }} minutes<br>
+            Coût estimé total : {{ total_prix }} €
+        </div>
+
+        <!-- Timeline -->
         <div class="timeline">
             {% for step in planning %}
                 <div class="timeline-step {% if step.titre == 'Marche' %}timeline-marche{% endif %}">
                     {% if step.titre == 'Marche' %}
                         <div class="text-muted fst-italic">
                             <strong>Marche</strong> : de {{ step.debut }} à {{ step.fin }}<br>
-                            Trajet entre : {{ step.item.from }} → {{ step.item.to }}<br>
-                            Temps estimé : {{ step.item.duration }} min
+                            Trajet entre : {{ step.item['from'] }} → {{ step.item['to'] }}<br>
+                            Temps estimé : {{ step.item['duration'] }} min
                         </div>
+
                     {% elif step.titre == 'Restaurant' %}
                         <div class="card p-3">
                             <h5><strong>Restaurant : {{ step.debut }} - {{ step.fin }}</strong></h5>
                             <div class="row">
                                 <div class="col-md-3">
-                                    <img src="{{ step.item.image }}" class="img-fluid rounded" alt="Image">
+                                    {% if step.item['image'] %}
+                                        <img src="{{ step.item['image'] }}" class="img-fluid rounded" alt="Image Restaurant">
+                                    {% else %}
+                                        <div class="bg-light text-center p-3 rounded">Pas d'image</div>
+                                    {% endif %}
                                 </div>
                                 <div class="col-md-9">
-                                    <p><strong>Nom :</strong> {{ step.item.name }}</p>
-                                    <p><strong>Spécialités :</strong> {{ step.item.specialties }}</p>
-                                    <p><strong>Adresse :</strong> {{ step.item.address }}</p>
-                                    <p><strong>Téléphone :</strong> {{ step.item.phone }}</p>
-                                    <p><strong>Prix :</strong> {{ step.item.prix_min }} €</p>
-                                    <p><strong>Note :</strong> {{ step.item.rating }}</p>
-                                    <p><strong>Horaires {{ jour_label }} :</strong> {{ step.item[jour_label] }}</p>
+                                    <p><strong>Nom :</strong> {{ step.item['name'] }}</p>
+                                    <p><strong>Spécialités :</strong> {{ step.item['specialties'] }}</p>
+                                    <p><strong>Adresse :</strong> {{ step.item['address'] }}</p>
+                                    <p><strong>Téléphone :</strong> {{ step.item['phone'] }}</p>
+                                    <p><strong>Prix :</strong> {{ step.item['prix_min'] if 'prix_min' in step.item else 'N/D' }} €</p>
+                                    <p><strong>Note :</strong> {{ step.item['note_corrigee'] }}/10</p>
+                                    <p><strong>Horaires {{ jour_label }} :</strong> {{ step.item.get(jour_label, 'N/D') }}</p>
                                 </div>
                             </div>
                         </div>
+
                     {% elif step.titre == 'Activité' %}
                         <div class="card p-3">
                             <h5><strong>Activité : {{ step.debut }} - {{ step.fin }}</strong></h5>
                             <div class="row">
                                 <div class="col-md-3">
-                                    <img src="{{ step.item.image }}" class="img-fluid rounded" alt="Image">
+                                    {% if step.item['image'] %}
+                                        <img src="{{ step.item['image'] }}" class="img-fluid rounded" alt="Image Activité">
+                                    {% else %}
+                                        <div class="bg-light text-center p-3 rounded">Pas d'image</div>
+                                    {% endif %}
                                 </div>
                                 <div class="col-md-9">
-                                    <p><strong>Nom :</strong> {{ step.item.nom }}</p>
-                                    <p><strong>Thèmes :</strong> {{ step.item.thèmes }}</p>
-                                    <p><strong>Adresse :</strong> {{ step.item.adresse }}</p>
-                                    <p><strong>Téléphone :</strong> {{ step.item.tel }}</p>
-                                    <p><strong>Prix :</strong> {{ step.item.tarifs }} €</p>
-                                    <p><strong>Note :</strong> {{ step.item.note }}</p>
-                                    <p><strong>Horaires {{ jour_label }} :</strong> {{ step.item.horaire_du_jour }}</p>
+                                    <p><strong>Nom :</strong> {{ step.item['nom'] }}</p>
+                                    <p><strong>Thèmes :</strong> {{ step.item['thèmes'] }}</p>
+                                    <p><strong>Adresse :</strong> {{ step.item['adresse'] }}</p>
+                                    <p><strong>Téléphone :</strong> {{ step.item['tel'] }}</p>
+                                    <p><strong>Prix :</strong> {{ step.item['tarifs'] }} €</p>
+                                    {% if step.item['note_corrigee'] is not none %}
+                                        <p><strong>Note :</strong> {{ step.item['note_corrigee'] }}/10</p>
+                                    {% endif %}
+                                    <p><strong>Horaires {{ jour_label }} :</strong> 
+                                        {% if step.item[jour_label]|lower == 'n/d' or not step.item[jour_label] %}
+                                            Ouvert toute la journée
+                                        {% else %}
+                                            {{ step.item[jour_label] }}
+                                        {% endif %}
+                                    </p>                                    
                                 </div>
                             </div>
                         </div>
@@ -85,6 +116,7 @@
             {% endfor %}
         </div>
 
+        <!-- Bouton retour -->
         <div class="text-center mt-5">
             <a href="/" class="btn btn-secondary">Nouvelle recherche</a>
         </div>
